@@ -2,7 +2,7 @@ import itertools
 import random
 
 
-class Minesweeper():
+class Minesweeper:
     """
     Minesweeper game representation
     """
@@ -84,7 +84,7 @@ class Minesweeper():
         return self.mines_found == self.mines
 
 
-class Sentence():
+class Sentence:
     """
     Logical statement about a Minesweeper game
     A sentence consists of a set of board cells,
@@ -105,16 +105,17 @@ class Sentence():
         """
         Returns the set of all cells in self.cells known to be mines.
         """
-        if len(self.cells) == self.count:
-            return set(self.cells)
-        raise NotImplementedError
+        if len(self.cells) == self.count and self.count != 0:
+            print("Mine found: ", self.cells)
+            return self.cells
+        return set()
 
     def known_safes(self):
         """
         Returns the set of all cells in self.cells known to be safe.
         """
         if self.count == 0:
-            return set(self.cells)
+            return self.cells
         return set()
 
     def mark_mine(self, cell):
@@ -125,7 +126,6 @@ class Sentence():
         if cell in self.cells:
             self.cells.remove(cell)
             self.count -= 1  # num of mines --
-        raise NotImplementedError
 
     def mark_safe(self, cell):
         """
@@ -134,10 +134,9 @@ class Sentence():
         """
         if cell in self.cells:
             self.cells.remove(cell)
-        raise NotImplementedError
 
 
-class MinesweeperAI():
+class MinesweeperAI:
     """
     Minesweeper game player
     """
@@ -190,16 +189,70 @@ class MinesweeperAI():
             5) add any new sentences to the AI's knowledge base
                if they can be inferred from existing knowledge
         """
-        self.moves_made.add(cell)  # 1
-        self.mark_safe(cell)  # 2
-        new_sentence = set()  # 3
-        x0, y0 = cell
-        for x in range(max(x0 - 1, 0), min(x0 + 2, self.height)):
-            for y in range(max(y0 - 1, 0), min(y0 + 2, self.width)):
-                if (x0, y0) != (x, y):
-                    new_sentence.add((x, y))
-        self.mark_safe_or_mines()
-        raise NotImplementedError
+        self.moves_made.add(cell)
+        self.mark_safe(cell)
+
+        new_sentence_cells = set()
+
+        for i in range(cell[0] - 1, cell[0] + 2):
+            for j in range(cell[1] - 1, cell[1] + 2):
+                if (i, j) == cell:
+                    continue
+                if (i, j) in self.safes:
+                    continue
+                if (i, j) in self.mines:
+                    count = count - 1
+                    continue
+                if 0 <= i < self.height and 0 <= j < self.width:
+                    new_sentence_cells.add((i, j))
+
+        print(f'Move on cell: {cell} has added sentence to knowledge {new_sentence_cells} = {count}')
+        self.knowledge.append(Sentence(new_sentence_cells, count))
+
+        knowledge_changed = True
+        while knowledge_changed:
+            knowledge_changed = False
+
+            safes = set()
+            mines = set()
+            for sentence in self.knowledge:
+                safes = safes.union(sentence.known_safes())
+                mines = mines.union(sentence.known_mines())
+
+            if safes:
+                knowledge_changed = True
+                for safe in safes:
+                    self.mark_safe(safe)
+            if mines:
+                knowledge_changed = True
+                for mine in mines:
+                    self.mark_mine(mine)
+
+            empty = Sentence(set(), 0)
+            self.knowledge[:] = [x for x in self.knowledge if x != empty]
+
+            for s1 in self.knowledge:
+                for s2 in self.knowledge:
+
+                    if s1.cells == s2.cells:
+                        continue
+                    if s1.cells == set() and s1.count > 0:
+                        print('Error - sentence with no cells and count created')
+                        raise ValueError
+
+                    if s1.cells.issubset(s2.cells):
+                        new_sentence_cells = s2.cells - s1.cells
+                        new_sentence_count = s2.count - s1.count
+                        new_sentence = Sentence(new_sentence_cells, new_sentence_count)
+
+                        if new_sentence not in self.knowledge:
+                            knowledge_changed = True
+                            print('New Inferred Knowledge: ', new_sentence, 'from', s1, ' and ', s2)
+                            self.knowledge.append(new_sentence)
+
+        print('Known Mines: ', self.mines)
+        print('Safe Moves Remaining: ', self.safes - self.moves_made)
+        print('--------------------------------------------------------')
 
     def make_safe_move(self):
         """
@@ -210,7 +263,11 @@ class MinesweeperAI():
         This function may use the knowledge in self.mines, self.safes
         and self.moves_made, but should not modify any of those values.
         """
-        raise NotImplementedError
+        safe_moves = self.safes - self.moves_made
+        if safe_moves:
+            print("Making a safe move. Other safe moves available: ", len(safe_moves))
+            return random.choice(list(safe_moves))
+        return None
 
     def make_random_move(self):
         """
@@ -219,4 +276,42 @@ class MinesweeperAI():
             1) have not already been chosen, and
             2) are not known to be mines
         """
-        raise NotImplementedError
+        MINES = 8
+        poss = {}
+        mines_left = MINES - len(self.mines)
+        spaces_left = 64 - len(self.mines) - len(self.moves_made)
+
+        if spaces_left == 0:
+            return None
+
+        # probability of choosing a mine vs not
+        prob = mines_left / spaces_left
+
+        # possible moves
+        for i in range(0, self.height):
+            for j in range(0, self.width):
+                if (i, j) not in self.mines and (i, j) not in self.moves_made:
+                    poss[(i, j)] = prob
+
+        # if initial state(first move)
+        if not self.knowledge and poss:
+            move = random.choice(list(poss.keys()))
+            return move
+        elif poss:
+            for s in self.knowledge:
+                num_cells = len(s.cells)
+                mine_prob = s.count / num_cells
+                for cell in s.cells:
+                    if poss[cell] < mine_prob:
+                        poss[cell] = mine_prob
+
+        # return move with best chance of not being a mine
+        move_list = [[x, poss[x]] for x in poss]
+        move_list.sort(key=lambda x: x[1])
+        best_prob = move_list[0][1]
+
+        best_moves = [x for x in move_list if x[1] == best_prob]
+        move = random.choice(best_moves)[0]
+        print('AI selecting random move with lowest mine probability: ', move)
+
+        return move
